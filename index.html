@@ -31,7 +31,7 @@
     align-items: center;
   }
 
-  /* Cámara de fondo, vista en espejo (perspectiva propia) y atenuada */
+  /* Cámara de fondo, espejada (perspectiva propia) y atenuada */
   video#video {
     position: absolute;
     top: 0;
@@ -40,6 +40,7 @@
     height: 100%;
     object-fit: cover;
     opacity: 0.25;
+    transform: scaleX(-1);
     pointer-events: none;
     z-index: 1;
   }
@@ -339,20 +340,91 @@
   }
 
   // ===================== BORRADOR =====================
+  function puntoEnCirculo(x, y, cx, cy, r2) {
+    const dx = x - cx;
+    const dy = y - cy;
+    return dx * dx + dy * dy <= r2;
+  }
+
+  function distanciaPuntoASegmento(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    if (dx === 0 && dy === 0) {
+      const ddx = px - x1;
+      const ddy = py - y1;
+      return Math.sqrt(ddx * ddx + ddy * ddy);
+    }
+    const t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+    const clampedT = Math.max(0, Math.min(1, t));
+    const closestX = x1 + clampedT * dx;
+    const closestY = y1 + clampedT * dy;
+    const ddx = px - closestX;
+    const ddy = py - closestY;
+    return Math.sqrt(ddx * ddx + ddy * ddy);
+  }
+
   function borrarCerca(cx, cy) {
     const r = CONFIG.radioBorrador;
     const r2 = r * r;
+    const resultado = [];
 
     for (const trazo of trazos) {
-      trazo.puntos = trazo.puntos.filter((punto) => {
-        const dx = punto.x - cx;
-        const dy = punto.y - cy;
-        return dx * dx + dy * dy > r2;
-      });
+      const p = trazo.puntos;
+      if (p.length < 2) continue;
+
+      let segmentoActual = [];
+
+      for (let i = 0; i < p.length; i++) {
+        const punto = p[i];
+        const dentro = puntoEnCirculo(punto.x, punto.y, cx, cy, r2);
+
+        if (!dentro) {
+          segmentoActual.push(punto);
+        } else {
+          if (segmentoActual.length > 0) {
+            resultado.push({ ...trazo, puntos: [...segmentoActual] });
+            segmentoActual = [];
+          }
+        }
+
+        // Verificar si el segmento entre este punto y el siguiente cruza el círculo
+        if (i < p.length - 1) {
+          const siguiente = p[i + 1];
+          const siguienteDentro = puntoEnCirculo(
+            siguiente.x,
+            siguiente.y,
+            cx,
+            cy,
+            r2
+          );
+
+          // Ambos extremos fuera, pero la línea pasa por dentro del círculo
+          if (!dentro && !siguienteDentro) {
+            const dist = distanciaPuntoASegmento(
+              cx,
+              cy,
+              punto.x,
+              punto.y,
+              siguiente.x,
+              siguiente.y
+            );
+            if (dist < r) {
+              // Cortar el trazo aquí
+              if (segmentoActual.length > 0) {
+                resultado.push({ ...trazo, puntos: [...segmentoActual] });
+                segmentoActual = [];
+              }
+            }
+          }
+        }
+      }
+
+      if (segmentoActual.length > 0) {
+        resultado.push({ ...trazo, puntos: segmentoActual });
+      }
     }
 
-    // Elimina trazos que quedaron vacíos
-    trazos = trazos.filter((t) => t.puntos.length > 0);
+    trazos = resultado;
   }
 
   function dibujarBorrador(x, y) {
@@ -407,9 +479,9 @@
     // Punta del índice (landmark 8) en coordenadas normalizadas 0-1
     const indice = landmarks[LANDMARKS.puntaIndice];
 
-    // Mapea a píxeles del canvas (la cámara selfie ya viene espejada,
-    // así que no hace falta invertir la X)
-    const xRaw = indice.x * canvas.width;
+    // La cámara está espejada visualmente (scaleX -1), así que compensamos
+    // para que el trazo aparezca donde ves tu dedo en la pantalla
+    const xRaw = (1 - indice.x) * canvas.width;
     const yRaw = indice.y * canvas.height;
 
     // Suavizado lineal para evitar temblores
