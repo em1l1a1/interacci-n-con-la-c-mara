@@ -442,7 +442,7 @@
   function bucleRender() {
     if (video.readyState >= 2) {
       // HAVE_CURRENT_DATA o superior
-      hands.sendImage(video);
+      hands.send({ image: video });
     }
     requestAnimationFrame(bucleRender);
   }
