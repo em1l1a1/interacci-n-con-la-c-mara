@@ -208,8 +208,8 @@
 
   hands.setOptions({
     modelComplexity: 1,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.7,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5,
     maxNumHands: 1,
   });
 
@@ -456,7 +456,7 @@
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     ctx.restore();
 
-    // No hay mano detectada
+    // No hay landmarks de mano detectados
     if (
       !results.multiHandLandmarks ||
       results.multiHandLandmarks.length === 0
@@ -479,8 +479,7 @@
     // Punta del índice (landmark 8) en coordenadas normalizadas 0-1
     const indice = landmarks[LANDMARKS.puntaIndice];
 
-    // La cámara está espejada visualmente (scaleX -1), así que compensamos
-    // para que el trazo aparezca donde ves tu dedo en la pantalla
+    // Mapea a píxeles del canvas con espejo horizontal (cámara volteada)
     const xRaw = (1 - indice.x) * canvas.width;
     const yRaw = indice.y * canvas.height;
 
@@ -512,8 +511,8 @@
 
   // ===================== BUCLE PRINCIPAL =====================
   function bucleRender() {
-    if (video.readyState >= 2) {
-      // HAVE_CURRENT_DATA o superior
+    // Espera a que el video tenga frames válidos antes de enviar a MediaPipe
+    if (video.readyState >= 2 && video.videoWidth > 0) {
       hands.send({ image: video });
     }
     requestAnimationFrame(bucleRender);
