@@ -31,7 +31,7 @@
     align-items: center;
   }
 
-  /* Cámara de fondo, espejada y atenuada */
+  /* Cámara de fondo, vista en espejo (perspectiva propia) y atenuada */
   video#video {
     position: absolute;
     top: 0;
@@ -40,7 +40,6 @@
     height: 100%;
     object-fit: cover;
     opacity: 0.25;
-    transform: scaleX(-1);
     pointer-events: none;
     z-index: 1;
   }
@@ -408,8 +407,9 @@
     // Punta del índice (landmark 8) en coordenadas normalizadas 0-1
     const indice = landmarks[LANDMARKS.puntaIndice];
 
-    // Mapea a píxeles del canvas con espejo horizontal
-    const xRaw = (1 - indice.x) * canvas.width;
+    // Mapea a píxeles del canvas (la cámara selfie ya viene espejada,
+    // así que no hace falta invertir la X)
+    const xRaw = indice.x * canvas.width;
     const yRaw = indice.y * canvas.height;
 
     // Suavizado lineal para evitar temblores

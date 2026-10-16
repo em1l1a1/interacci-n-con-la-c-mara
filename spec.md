@@ -75,8 +75,8 @@ Landmarks clave:
 - Si la cámara no está disponible o se niega el permiso, muestra un mensaje claro explicando qué hacer.
 
 ## 10. Mapeo de coordenadas
-Coordenadas normalizadas de MediaPipe (0 a 1) → píxeles del canvas (1280×720):
-- `xCanvas = (1 - xNormalizado) * 1280` (espejo horizontal)
+La cámara selfie (`facingMode: 'user') entrega la imagen ya espejada desde la perspectiva del usuario. Las coordenadas normalizadas de MediaPipe (0 a 1) se mapean directamente a píxeles del canvas (1280×720):
+- `xCanvas = xNormalizado * 1280`
 - `yCanvas = yNormalizado * 720`
 - Suavizado aplicado antes de dibujar cada punto.
 
