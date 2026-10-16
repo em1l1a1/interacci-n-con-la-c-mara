@@ -160,8 +160,8 @@
   </div>
 </div>
 
-<!-- MediaPipe Hands por CDN -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1652923499/hands.js"></script>
+<!-- MediaPipe Hands cargado localmente (evita problemas de MIME type en CDN) -->
+<script src="vendor/hands.js"></script>
 <script>
   // ===================== CONFIGURACIÓN (editar aquí) =====================
   const CONFIG = {
@@ -203,7 +203,7 @@
   // ===================== MEDIAPIPE HANDS =====================
   const hands = new Hands({
     locateFile: (file) =>
-      `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1652923499/${file}`,
+      `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
   });
 
   hands.setOptions({
