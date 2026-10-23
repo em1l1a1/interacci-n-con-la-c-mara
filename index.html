@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dibujar en el Aire con la Mano</title>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    background: #0f172a;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  #contenedor {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  /* Cámara de fondo, espejada (perspectiva propia) y atenuada */
+  video#video {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.25;
+    transform: scaleX(-1);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Lienzo de dibujo 16:9 (1280x720) escalado al viewport */
+  canvas#lienzo {
+    position: relative;
+    max-width: 100vw;
+    max-height: 100vh;
+    object-fit: contain;
+    background: transparent;
+    z-index: 2;
+  }
+
+  /* Mensaje cuando no se detecta mano */
+  #mensaje-esperando {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #94a3b8;
+    pointer-events: none;
+    z-index: 10;
+    text-align: center;
+  }
+
+  /* Indicador de gesto actual */
+  #indicador-gesto {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #e2e8f0;
+    background: rgba(15, 23, 42, 0.8);
+    padding: 8px 16px;
+    border-radius: 8px;
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    z-index: 20;
+  }
+
+  /* Leyenda de gestos */
+  #leyenda-gestos {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    font-size: 0.9rem;
+    color: #cbd5e1;
+    background: rgba(15, 23, 42, 0.8);
+    padding: 12px 16px;
+    border-radius: 8px;
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    z-index: 20;
+    line-height: 1.6;
+  }
+
+  #leyenda-gestos div {
+    margin-bottom: 4px;
+  }
+
+  #leyenda-gestos strong {
+    color: #38bdf8;
+  }
+
+  /* Error de cámara */
+  #error-camara {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.2rem;
+    color: #f87171;
+    text-align: center;
+    pointer-events: none;
+    z-index: 10;
+    max-width: 80%;
+    padding: 20px;
+    background: rgba(15, 23, 42, 0.95);
+    border-radius: 12px;
+    border: 1px solid #f87171;
+    display: none;
+  }
+
+  #error-camara div:first-child {
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .oculto {
+    display: none !important;
+  }
+</style>
+</head>
+<body>
+<div id="contenedor">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="lienzo" width="1280" height="720"></canvas>
+
+  <div id="mensaje-esperando">Muestra tu mano a la cámara</div>
+  <div id="indicador-gesto">Esperando...</div>
+
+  <div id="leyenda-gestos">
+    <div><strong>Índice:</strong> dibujar</div>
+    <div><strong>Mano abierta:</strong> pausa</div>
+    <div><strong>Puño:</strong> borrar</div>
+  </div>
+
+  <div id="error-camara">
+    <div>Cámara no disponible</div>
+    <div style="margin-top: 8px; font-size: 0.9rem; opacity: 0.9;">
+      Permite el acceso a la cámara o comprueba que no esté en uso por otra aplicación.
+    </div>
+  </div>
+</div>
+
+<!-- MediaPipe Hands cargado localmente (evita problemas de MIME type en CDN) -->
+<script src="vendor/hands.js"></script>
+<script>
+  // ===================== CONFIGURACIÓN (editar aquí) =====================
+  const CONFIG = {
+    colorTrazo: '#22d3ee',      // color del trazo
+    grosorTrazo: 5,             // grosor del trazo en píxeles
+    factorSuavizado: 0.35,      // 0 = sin suavizado, 1 = mucho suavizado
+    radioBorrador: 40,          // radio del borrador en píxeles
+    opacidadCamara: 0.25,       // opacidad de la cámara de fondo (0 a 1)
+    tamanoCursor: 8,            // radio del cursor en pausa (píxeles)
+  };
+
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('lienzo');
+  const ctx = canvas.getContext('2d');
+  const mensajeEsperando = document.getElementById('mensaje-esperando');
+  const indicadorGesto = document.getElementById('indicador-gesto');
+  const errorCamara = document.getElementById('error-camara');
+
+  // Estado de la aplicación
+  let trazos = [];              // todos los trazos dibujados
+  let trazoActual = null;       // trazo en curso (null si no se dibuja)
+  let posSuave = { x: 0, y: 0 }; // posición suavizada del índice
+  let hayPosicionSuave = false; // si ya se inicializó el suavizado
+
+  // Landmarks de MediaPipe Hands (21 puntos por mano)
+  const LANDMARKS = {
+    puntaIndice: 8,
+    articulacionIndice: 6,
+    puntaMedio: 12,
+    articulacionMedio: 10,
+    puntaAnular: 16,
+    articulacionAnular: 14,
+    puntaMenique: 20,
+    articulacionMenique: 18,
+    puntaPulgar: 4,
+    articulacionPulgar: 2,
+  };
+
+  // ===================== MEDIAPIPE HANDS =====================
+  const hands = new Hands({
+    locateFile: (file) =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
+  });
+
+  hands.setOptions({
+    modelComplexity: 1,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+    maxNumHands: 1,
+  });
+
+  hands.onResults(onResults);
+
+  // ===================== CÁMARA =====================
+  async function iniciarCamara() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+      });
+      video.srcObject = stream;
+      video.onloadedmetadata = () => {
+        video.play();
+        bucleRender();
+      };
+    } catch (err) {
+      console.error('Error accediendo a la cámara:', err);
+      mostrarErrorCamara();
+    }
+  }
+
+  function mostrarErrorCamara() {
+    errorCamara.style.display = 'block';
+    mensajeEsperando.style.display = 'none';
+  }
+
+  // ===================== DETECCIÓN DE GESTOS =====================
+  // Devuelve true si el dedo está extendido (punta más arriba que articulación)
+  function dedoExtendido(puntaIdx, articulacionIdx, landmarks) {
+    return landmarks[puntaIdx].y < landmarks[articulacionIdx].y;
+  }
+
+  function detectarGesto(landmarks) {
+    const indice = dedoExtendido(
+      LANDMARKS.puntaIndice,
+      LANDMARKS.articulacionIndice,
+      landmarks
+    );
+    const medio = dedoExtendido(
+      LANDMARKS.puntaMedio,
+      LANDMARKS.articulacionMedio,
+      landmarks
+    );
+    const anular = dedoExtendido(
+      LANDMARKS.puntaAnular,
+      LANDMARKS.articulacionAnular,
+      landmarks
+    );
+    const menique = dedoExtendido(
+      LANDMARKS.puntaMenique,
+      LANDMARKS.articulacionMenique,
+      landmarks
+    );
+
+    // Pulgar: comparar en X por el efecto espejo
+    const pulgar =
+      landmarks[LANDMARKS.puntaPulgar].x >
+      landmarks[LANDMARKS.articulacionPulgar].x;
+
+    const soloIndice =
+      indice && !medio && !anular && !menique && !pulgar;
+    const todosExtendidos =
+      indice && medio && anular && menique && pulgar;
+    const todosDoblados =
+      !indice && !medio && !anular && !menique && !pulgar;
+
+    if (soloIndice) return 'Dibujando';
+    if (todosExtendidos) return 'Pausa';
+    if (todosDoblados) return 'Borrando';
+    return 'Desconocido';
+  }
+
+  // ===================== TRAZOS =====================
+  function iniciarTrazo(x, y) {
+    trazoActual = {
+      puntos: [{ x, y }],
+      color: CONFIG.colorTrazo,
+      grosor: CONFIG.grosorTrazo,
+      terminado: false,
+    };
+    trazos.push(trazoActual);
+  }
+
+  function agregarPunto(x, y) {
+    if (!trazoActual) {
+      iniciarTrazo(x, y);
+      return;
+    }
+    trazoActual.puntos.push({ x, y });
+  }
+
+  function finalizarTrazo() {
+    if (trazoActual) {
+      trazoActual.terminado = true;
+      trazoActual = null;
+    }
+  }
+
+  // Dibuja todos los trazos guardados con curvas de Bézier cuadrática
+  function dibujarTrazos() {
+    ctx.save();
+    for (const trazo of trazos) {
+      const p = trazo.puntos;
+      if (p.length < 2) continue;
+
+      ctx.strokeStyle = trazo.color;
+      ctx.lineWidth = trazo.grosor;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      ctx.beginPath();
+      ctx.moveTo(p[0].x, p[0].y);
+
+      // Curvas suaves entre puntos (Bézier cuadrática)
+      for (let i = 1; i < p.length - 1; i++) {
+        const cpX = (p[i].x + p[i + 1].x) / 2;
+        const cpY = (p[i].y + p[i + 1].y) / 2;
+        ctx.quadraticCurveTo(p[i].x, p[i].y, cpX, cpY);
+      }
+
+      // Cierra hasta el último punto
+      const ultimo = p[p.length - 1];
+      ctx.quadraticCurveTo(ultimo.x, ultimo.y, ultimo.x, ultimo.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ===================== BORRADOR =====================
+  function puntoEnCirculo(x, y, cx, cy, r2) {
+    const dx = x - cx;
+    const dy = y - cy;
+    return dx * dx + dy * dy <= r2;
+  }
+
+  function distanciaPuntoASegmento(px, py, x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    if (dx === 0 && dy === 0) {
+      const ddx = px - x1;
+      const ddy = py - y1;
+      return Math.sqrt(ddx * ddx + ddy * ddy);
+    }
+    const t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+    const clampedT = Math.max(0, Math.min(1, t));
+    const closestX = x1 + clampedT * dx;
+    const closestY = y1 + clampedT * dy;
+    const ddx = px - closestX;
+    const ddy = py - closestY;
+    return Math.sqrt(ddx * ddx + ddy * ddy);
+  }
+
+  function borrarCerca(cx, cy) {
+    const r = CONFIG.radioBorrador;
+    const r2 = r * r;
+    const resultado = [];
+
+    for (const trazo of trazos) {
+      const p = trazo.puntos;
+      if (p.length < 2) continue;
+
+      let segmentoActual = [];
+
+      for (let i = 0; i < p.length; i++) {
+        const punto = p[i];
+        const dentro = puntoEnCirculo(punto.x, punto.y, cx, cy, r2);
+
+        if (!dentro) {
+          segmentoActual.push(punto);
+        } else {
+          if (segmentoActual.length > 0) {
+            resultado.push({ ...trazo, puntos: [...segmentoActual] });
+            segmentoActual = [];
+          }
+        }
+
+        // Verificar si el segmento entre este punto y el siguiente cruza el círculo
+        if (i < p.length - 1) {
+          const siguiente = p[i + 1];
+          const siguienteDentro = puntoEnCirculo(
+            siguiente.x,
+            siguiente.y,
+            cx,
+            cy,
+            r2
+          );
+
+          // Ambos extremos fuera, pero la línea pasa por dentro del círculo
+          if (!dentro && !siguienteDentro) {
+            const dist = distanciaPuntoASegmento(
+              cx,
+              cy,
+              punto.x,
+              punto.y,
+              siguiente.x,
+              siguiente.y
+            );
+            if (dist < r) {
+              // Cortar el trazo aquí
+              if (segmentoActual.length > 0) {
+                resultado.push({ ...trazo, puntos: [...segmentoActual] });
+                segmentoActual = [];
+              }
+            }
+          }
+        }
+      }
+
+      if (segmentoActual.length > 0) {
+        resultado.push({ ...trazo, puntos: segmentoActual });
+      }
+    }
+
+    trazos = resultado;
+  }
+
+  function dibujarBorrador(x, y) {
+    ctx.save();
+    ctx.strokeStyle = '#f87171';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.45;
+    ctx.beginPath();
+    ctx.arc(x, y, CONFIG.radioBorrador, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function dibujarCursor(x, y) {
+    ctx.save();
+    ctx.fillStyle = '#38bdf8';
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.arc(x, y, CONFIG.tamanoCursor, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ===================== RESULTADOS DE MEDIAPIPE =====================
+  function onResults(results) {
+    // Dibuja la cámara como fondo atenuado
+    ctx.save();
+    ctx.globalAlpha = CONFIG.opacidadCamara;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    // No hay landmarks de mano detectados
+    if (
+      !results.multiHandLandmarks ||
+      results.multiHandLandmarks.length === 0
+    ) {
+      mensajeEsperando.style.display = 'block';
+      indicadorGesto.textContent = 'Esperando...';
+      finalizarTrazo();
+      hayPosicionSuave = false;
+      dibujarTrazos();
+      return;
+    }
+
+    mensajeEsperando.style.display = 'none';
+
+    // Usa la mano con mayor confianza (primera en la lista)
+    const landmarks = results.multiHandLandmarks[0];
+    const gesto = detectarGesto(landmarks);
+    indicadorGesto.textContent = gesto;
+
+    // Punta del índice (landmark 8) en coordenadas normalizadas 0-1
+    const indice = landmarks[LANDMARKS.puntaIndice];
+
+    // Mapea a píxeles del canvas con espejo horizontal (cámara volteada)
+    const xRaw = (1 - indice.x) * canvas.width;
+    const yRaw = indice.y * canvas.height;
+
+    // Suavizado lineal para evitar temblores
+    if (!hayPosicionSuave) {
+      posSuave = { x: xRaw, y: yRaw };
+      hayPosicionSuave = true;
+    } else {
+      const f = CONFIG.factorSuavizado;
+      posSuave.x = posSuave.x + (xRaw - posSuave.x) * f;
+      posSuave.y = posSuave.y + (yRaw - posSuave.y) * f;
+    }
+
+    // Ejecuta acción según el gesto detectado
+    if (gesto === 'Dibujando') {
+      agregarPunto(posSuave.x, posSuave.y);
+      dibujarTrazos();
+    } else if (gesto === 'Pausa') {
+      finalizarTrazo();
+      dibujarTrazos();
+      dibujarCursor(posSuave.x, posSuave.y);
+    } else if (gesto === 'Borrando') {
+      finalizarTrazo();
+      borrarCerca(posSuave.x, posSuave.y);
+      dibujarTrazos();
+      dibujarBorrador(posSuave.x, posSuave.y);
+    }
+  }
+
+  // ===================== BUCLE PRINCIPAL =====================
+  function bucleRender() {
+    // Espera a que el video tenga frames válidos antes de enviar a MediaPipe
+    if (video.readyState >= 2 && video.videoWidth > 0) {
+      hands.send({ image: video });
+    }
+    requestAnimationFrame(bucleRender);
+  }
+
+  // Iniciar aplicación
+  iniciarCamara();
+</script>
+</body>
+</html>

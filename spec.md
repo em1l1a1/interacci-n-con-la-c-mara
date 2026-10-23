@@ -52,11 +52,12 @@ Landmarks clave:
 ```
 
 ## 6. Borrador
-- Con el puño cerrado, los trazos cercanos a la palma desaparecen.
+- Con el puño cerrado, se borra la parte de los trazos que toca el círculo del borrador.
 - Se muestra un círculo semitransparente que indica el área que se está borrando.
 - Radio del borrador: **40 px** (variable al inicio del código).
-- Se eliminan todos los puntos de todos los trazos cuya coordenada caiga dentro del círculo del borrador.
-- Si un trazo queda sin puntos, se borra por completo.
+- El borrado corta el trazo en el punto donde el círculo lo toca, eliminando la parte afectada y manteniendo los fragmentos que quedan fuera del círculo.
+- Si un trazo queda dividido en fragmentos, cada fragmento se conserva como trazo independiente.
+- Si un trazo queda completamente dentro del círculo, se borra por completo.
 
 ## 7. Indicador en pantalla
 - Texto pequeño en una esquina que dice el gesto actual: "Dibujando", "Pausa" o "Borrando".
@@ -75,8 +76,8 @@ Landmarks clave:
 - Si la cámara no está disponible o se niega el permiso, muestra un mensaje claro explicando qué hacer.
 
 ## 10. Mapeo de coordenadas
-Coordenadas normalizadas de MediaPipe (0 a 1) → píxeles del canvas (1280×720):
-- `xCanvas = (1 - xNormalizado) * 1280` (espejo horizontal)
+La cámara se muestra espejada (`transform: scaleX(-1)`) para que se vea desde tu perspectiva propia. Las coordenadas normalizadas de MediaPipe (0 a 1) se compensan para que el trazo aparezca donde ves tu dedo:
+- `xCanvas = (1 - xNormalizado) * 1280`
 - `yCanvas = yNormalizado * 720`
 - Suavizado aplicado antes de dibujar cada punto.
 
